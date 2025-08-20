@@ -11,11 +11,9 @@ from typing import Optional, Tuple
 # -------------------------------
 
 def _normalise_text(text: str) -> str:
-    # Collapse multiple spaces/newlines to make regexes more reliable
     return re.sub(r"[ \t]+", " ", re.sub(r"\r?\n+", "\n", text)).strip()
 
 def _safe_filename(name: str) -> str:
-    # Remove filesystem-unsafe chars and trim
     name = re.sub(r'[\\/:*?"<>|]+', "_", name).strip().strip(".")
     return name or "unnamed"
 
@@ -33,25 +31,19 @@ def _detect_supplier(text: str) -> Optional[str]:
         return "SSE"
     return None
 
-# ------------ NEW: extract both AGR and invoice ------------
+# --- extract both AGR and invoice IDs ---
 def extract_ids_from_text(text: str) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Returns (invoice_ref, agr_ref) in UPPERCASE if found.
-    Accepts IV/IN/CN as invoice refs. Handles hyphenated forms.
-    """
-
-    # 0) Hyphenated patterns in either order; normalise to consistent pieces
+    # Hyphenated in either order
     m = re.search(r"\b((?:IV|IN|CN)\d{5,})\s*[-–]\s*(AGR\d{4,})\b", text, re.IGNORECASE)
     if m:
         inv, agr = m.group(1).upper(), m.group(2).upper()
         return inv, agr
-
     m = re.search(r"\b(AGR\d{4,})\s*[-–]\s*((?:IV|IN|CN)\d{5,})\b", text, re.IGNORECASE)
     if m:
         agr, inv = m.group(1).upper(), m.group(2).upper()
         return inv, agr
 
-    # 1) Vendor-specific (Corona) fallback for invoice refs
+    # Vendor-specific (Corona) for invoice
     inv = None
     if re.search(r"\bcorona\s+energy\b", text, re.IGNORECASE):
         for pat in [r"\bCN\d+\b", r"\bIN\d+\b", r"Invoice Number\s+(IV\d+|CN\d+)"]:
@@ -60,7 +52,7 @@ def extract_ids_from_text(text: str) -> Tuple[Optional[str], Optional[str]]:
                 inv = (m.group(1) if m.groups() else m.group(0)).upper()
                 break
 
-    # 2) Generic invoice ref fallbacks
+    # Generic invoice fallbacks
     if not inv:
         for pat in [
             r"\b(?:IV|IN|CN)\d{5,}\b",
@@ -73,13 +65,9 @@ def extract_ids_from_text(text: str) -> Tuple[Optional[str], Optional[str]]:
                 inv = re.sub(r"\s*[-–]\s*", "-", inv).upper()
                 break
 
-    # 3) AGR detection (SSE etc.)
+    # AGR detection
     agr = None
-    for pat in [
-        r"\bAGR\d{4,}\b",
-        r"Site\s*reference\s*ID\s*(AGR\d{4,})",
-        r"\bSite\s*ID\s*(AGR\d{4,})",
-    ]:
+    for pat in [r"\bAGR\d{4,}\b", r"Site\s*reference\s*ID\s*(AGR\d{4,})", r"\bSite\s*ID\s*(AGR\d{4,})"]:
         m = re.search(pat, text, re.IGNORECASE)
         if m:
             agr = (m.group(1) if m.groups() else m.group(0)).upper()
@@ -88,9 +76,6 @@ def extract_ids_from_text(text: str) -> Tuple[Optional[str], Optional[str]]:
     return inv, agr
 
 def extract_refs(data: bytes) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """
-    Returns (invoice_ref, agr_ref, supplier_hint, error_message)
-    """
     try:
         with pdfplumber.open(BytesIO(data)) as pdf:
             texts = []
@@ -126,10 +111,6 @@ def ensure_unique(name: str, existing: set) -> str:
     return candidate
 
 def rename_and_zip_files(uploaded_files, prefix: str = "") -> Tuple[BytesIO, list]:
-    """
-    Returns (zip_bytes, results_list)
-    results_list: dicts with original_name, agr, invoice, supplier, output_name, note
-    """
     buf = BytesIO()
     results = []
     seen = set()
@@ -145,15 +126,10 @@ def rename_and_zip_files(uploaded_files, prefix: str = "") -> Tuple[BytesIO, lis
             if agr and inv:
                 out_base = f"{prefix}{agr}-{inv}"
             elif inv:
-                out_base = f"{prefix}{inv}"  # fallback if AGR missing
-                if not note:
-                    note = "AGR not found"
+                out_base = f"{prefix}{inv}"
             else:
-                # keep a hint of original name to help users
                 orig_stem = os.path.splitext(f.name)[0]
                 out_base = f"{prefix}unreadable_{_safe_filename(orig_stem)}"
-                if not note:
-                    note = "Invoice ref not found"
 
             out_name = ensure_unique(_safe_filename(out_base) + ".pdf", seen)
             z.writestr(out_name, data)
@@ -171,17 +147,12 @@ def rename_and_zip_files(uploaded_files, prefix: str = "") -> Tuple[BytesIO, lis
     return buf, results
 
 # -------------------------------
-# Streamlit UI
+# Streamlit UI (minimal)
 # -------------------------------
 
 st.set_page_config(page_title="PDF Invoice Renamer", layout="centered")
 st.title("PDF Invoice Renamer")
-st.write("Upload one or more invoice PDFs and download them renamed. "
-         "Preferred format: AGR-INV (e.g. AGR0769915-IV03223288). If one is missing, we fall back gracefully.")
-
-with st.expander("Options", expanded=False):
-    prefix = st.text_input("Optional filename prefix (e.g. account/site code):", value="")
-    show_log = st.checkbox("Show extraction log table", value=True)
+st.write("Upload one or more invoice PDFs and download them renamed.")
 
 # Session-state counter for clearing uploader
 if "uploader_index" not in st.session_state:
@@ -200,6 +171,9 @@ uploaded_files = st.file_uploader(
     key=uploader_key
 )
 
+# No options/logs; just process & download
+prefix = ""  # keep empty; change here if you ever want a constant prefix
+
 if uploaded_files and st.button("Process and Download"):
     with st.spinner("Processing…"):
         if len(uploaded_files) == 1:
@@ -208,33 +182,16 @@ if uploaded_files and st.button("Process and Download"):
             data = f.read()
 
             inv, agr, supplier, err = extract_refs(data)
-            note = err or ""
             if agr and inv:
                 base = f"{prefix}{agr}-{inv}"
             elif inv:
                 base = f"{prefix}{inv}"
-                if not note:
-                    note = "AGR not found"
             else:
                 orig_stem = os.path.splitext(f.name)[0]
                 base = f"{prefix}unreadable_{_safe_filename(orig_stem)}"
-                if not note:
-                    note = "Invoice ref not found"
 
             filename = _safe_filename(base) + ".pdf"
-
             st.success("Done!")
-            if show_log:
-                st.write("**Result**")
-                st.table([{
-                    "original_name": f.name,
-                    "agr": agr or "",
-                    "invoice": inv or "",
-                    "supplier": supplier or "",
-                    "output_name": filename,
-                    "note": note
-                }])
-
             st.download_button(
                 label="⬇️ Download Renamed PDF",
                 data=data,
@@ -242,12 +199,8 @@ if uploaded_files and st.button("Process and Download"):
                 mime="application/pdf"
             )
         else:
-            zipf, results = rename_and_zip_files(uploaded_files, prefix=prefix)
+            zipf, _results = rename_and_zip_files(uploaded_files, prefix=prefix)
             st.success("Done!")
-            if show_log:
-                st.write("**Results**")
-                st.dataframe(results, use_container_width=True)
-
             st.download_button(
                 label="⬇️ Download Renamed PDFs as ZIP",
                 data=zipf,
