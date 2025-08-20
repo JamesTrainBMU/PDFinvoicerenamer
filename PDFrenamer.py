@@ -123,8 +123,8 @@ def rename_and_zip_files(uploaded_files, prefix: str = "") -> Tuple[BytesIO, lis
             inv, agr, supplier, err = extract_refs(data)
             note = err or ""
 
-            if agr and inv:
-                out_base = f"{prefix}{agr}-{inv}"
+            if inv and agr:
+                out_base = f"{prefix}{inv}-{agr}"       # <-- INV first, then AGR
             elif inv:
                 out_base = f"{prefix}{inv}"
             else:
@@ -152,7 +152,10 @@ def rename_and_zip_files(uploaded_files, prefix: str = "") -> Tuple[BytesIO, lis
 
 st.set_page_config(page_title="PDF Invoice Renamer", layout="centered")
 st.title("PDF Invoice Renamer")
-st.write("Upload one or more invoice PDFs and download them renamed.")
+st.write(
+    "Upload one or more invoice PDFs and download them renamed. "
+    "Preferred format: INV-AGR (e.g. IV03223288-AGR0769915)."
+)
 
 # Session-state counter for clearing uploader
 if "uploader_index" not in st.session_state:
@@ -171,8 +174,7 @@ uploaded_files = st.file_uploader(
     key=uploader_key
 )
 
-# No options/logs; just process & download
-prefix = ""  # keep empty; change here if you ever want a constant prefix
+prefix = ""  # leave empty; set a constant prefix here if ever needed
 
 if uploaded_files and st.button("Process and Download"):
     with st.spinner("Processing…"):
@@ -182,8 +184,8 @@ if uploaded_files and st.button("Process and Download"):
             data = f.read()
 
             inv, agr, supplier, err = extract_refs(data)
-            if agr and inv:
-                base = f"{prefix}{agr}-{inv}"
+            if inv and agr:
+                base = f"{prefix}{inv}-{agr}"          # <-- INV first, then AGR
             elif inv:
                 base = f"{prefix}{inv}"
             else:
