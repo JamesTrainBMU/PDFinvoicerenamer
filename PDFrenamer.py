@@ -153,9 +153,7 @@ def rename_and_zip_files(uploaded_files, prefix: str = "") -> Tuple[BytesIO, lis
 st.set_page_config(page_title="PDF Invoice Renamer", layout="centered")
 st.title("PDF Invoice Renamer")
 st.write(
-    "Upload one or more invoice PDFs and download them renamed. "
-    "Preferred format: INV-AGR (e.g. IV03223288-AGR0769915)."
-)
+    "Upload one or more invoice PDFs and download them renamed.")
 
 # Session-state counter for clearing uploader
 if "uploader_index" not in st.session_state:
